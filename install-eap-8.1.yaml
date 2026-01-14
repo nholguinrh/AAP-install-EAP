@@ -8,7 +8,7 @@
     jboss_group: jboss
     jboss_version: 8.1
     jboss_zip: jboss-eap-8.1.0.zip
-    jboss_backup_tar: jboss-backup.tar.gz  # Your backup file
+    jboss_backup_tar: jboss.tar.gz  # Your backup file
     restore_from_backup: false  # Set to true when restoring
     mgmt_user: adminadmin
     mgmt_password: 'MyStrongPassword123!'
