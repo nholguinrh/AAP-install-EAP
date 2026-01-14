@@ -14,7 +14,7 @@
     mgmt_password: 'MyStrongPassword123!'
     mgmt_groups: ManagementRealm
     # Configuration for existing user password update
-    existing_user: jboseap
+    existing_user: jbosseap
     existing_user_new_password: 'NewSecurePassword456!'
     
   tasks:
