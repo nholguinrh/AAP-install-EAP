@@ -37,12 +37,6 @@
         shell: /bin/bash
         create_home: yes
 
-    - name: Stop JBoss service if running
-      systemd:
-        name: jboss
-        state: stopped
-      ignore_errors: yes
-
     - name: Create temporary directory for backup
       file:
         path: /tmp/jboss_restore
@@ -58,15 +52,7 @@
       changed_when: scp_result.rc == 0
       failed_when: scp_result.rc != 0
 
-    - name: Verify backup file was copied
-      stat:
-        path: "/tmp/jboss_restore/{{ jboss_backup_tar }}"
-      register: backup_file
-      failed_when: not backup_file.stat.exists
 
-    - name: Display backup file size
-      debug:
-        msg: "Backup file size: {{ (backup_file.stat.size / 1024 / 1024) | round(2) }} MB"
 
     - name: Remove existing JBoss installation
       file:
@@ -127,3 +113,45 @@
             --silent
           become_user: "{{ jboss_user }}"
           register: user_update
+    
+      - name: Configure firewall for 8080 and 9990
+      firewalld:
+        port: "{{ item }}/tcp"
+        permanent: true
+        state: enabled
+        immediate: yes
+      loop:
+        - 8080
+        - 9990
+
+    - name: Create systemd service for JBoss
+      copy:
+        dest: /etc/systemd/system/jboss.service
+        content: |
+          [Unit]
+          Description=JBoss EAP 8
+          After=network.target
+
+          [Service]
+          User={{ jboss_user }}
+          Group={{ jboss_group }}
+          ExecStart={{ jboss_home }}/jboss-eap-{{ jboss_version }}/bin/standalone.sh -b 0.0.0.0 -bmanagement 0.0.0.0
+          ExecStop={{ jboss_home }}/jboss-eap-{{ jboss_version }}/bin/jboss-cli.sh --connect command=:shutdown
+          Restart=on-failure
+          RestartSec=10
+          LimitNOFILE=102642
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd
+
+    - name: Enable and start JBoss
+      systemd:
+        name: jboss
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Reload systemd
+      command: systemctl daemon-reload
