@@ -106,7 +106,7 @@
 
         - name: Update user password
           shell: |
-            {{ jboss_home }}/bin/add-user.sh -a \
+            {{ jboss_home }}/bin/add-user.sh \
             -u {{ existing_user }} \
             -p {{ existing_user_new_password }} \
             -g {{ mgmt_groups }} \
@@ -135,8 +135,8 @@
           [Service]
           User={{ jboss_user }}
           Group={{ jboss_group }}
-          ExecStart={{ jboss_home }}/jboss-eap-{{ jboss_version }}/bin/standalone.sh -b 0.0.0.0 -bmanagement 0.0.0.0
-          ExecStop={{ jboss_home }}/jboss-eap-{{ jboss_version }}/bin/jboss-cli.sh --connect command=:shutdown
+          ExecStart={{ jboss_home }}/bin/standalone.sh -b 0.0.0.0 -bmanagement 0.0.0.0
+          ExecStop={{ jboss_home }}/bin/jboss-cli.sh --connect command=:shutdown
           Restart=on-failure
           RestartSec=10
           LimitNOFILE=102642
