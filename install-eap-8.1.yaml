@@ -47,7 +47,7 @@
         - name: Extract backup to JBoss home
           unarchive:
             src: "/tmp/{{ jboss_backup_tar }}"
-            dest: /opt
+            dest: /opt 
             remote_src: yes
             owner: "{{ jboss_user }}"
             group: "{{ jboss_group }}"
