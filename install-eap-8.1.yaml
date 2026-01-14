@@ -53,15 +53,27 @@
       owner: "{{ jboss_user }}"
       group: "{{ jboss_group }}"
 
-  - name: Add management user
-    command: >
-      {{ jboss_home }}/jboss-eap-{{ jboss_version }}/bin/add-user.sh
-      -a
-      -u {{ mgmt_user }}
-      -p {{ mgmt_password }}
-      -g {{ mgmt_groups }}
-    args:
-      creates: "{{ jboss_home }}/jboss-eap-{{ jboss_version }}/standalone/configuration/mgmt-users.properties"
+  - name: Update password for existing user
+      block:
+        - name: Remove existing user entry
+          command: >
+            {{ jboss_home }}/jboss-eap-{{ jboss_version }}/bin/add-user.sh
+            -a
+            -u {{ existing_user }}
+            -p {{ existing_user_new_password }}
+            -g {{ mgmt_groups }}
+          become_user: "{{ jboss_user }}"
+          register: user_update
+          failed_when: false
+
+        - name: Display user update result
+          debug:
+            msg: "User {{ existing_user }} password has been updated"
+          when: user_update.rc == 0
+      when: 
+        - mgmt_users_file.stat.exists
+        - existing_user is defined
+        - existing_user_new_password is defined
 
   - name: Configure firewall for 8080 and 9990
     firewalld:
