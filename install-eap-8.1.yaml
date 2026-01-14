@@ -6,32 +6,72 @@
     jboss_home: /opt/jboss
     jboss_user: jboss
     jboss_group: jboss
-    jboss_version: 8.1
-    jboss_zip: jboss-eap-8.1.0.zip
-    jboss_backup_tar: jboss.tar.gz  # Your backup file
-    restore_from_backup: false  # Set to true when restoring
-    mgmt_user: adminadmin
-    mgmt_password: 'MyStrongPassword123!'
-    mgmt_groups: ManagementRealm
+    jboss_backup_tar: jboss.tar.gz
+    # Remote server details for SCP
+    remote_backup_server: 10.209.7.232
+    remote_backup_path: /home/jboss/jboss.tar.gz
+    remote_backup_user: jboss  # SSH user for the remote server
     # Configuration for existing user password update
     existing_user: jbosseap
     existing_user_new_password: 'NewSecurePassword456!'
+    mgmt_groups: ManagementRealm
     
   tasks:
     - name: Ensure required packages are installed
       dnf:
         name:
           - java-21-openjdk
-          - unzip
           - tar
+          - rsync
         state: present
 
-    - name: Create jboss user and group
+    - name: Create jboss group
+      group:
+        name: "{{ jboss_group }}"
+        state: present
+
+    - name: Create jboss user
       user:
         name: "{{ jboss_user }}"
         group: "{{ jboss_group }}"
         shell: /bin/bash
         create_home: yes
+
+    - name: Stop JBoss service if running
+      systemd:
+        name: jboss
+        state: stopped
+      ignore_errors: yes
+
+    - name: Create temporary directory for backup
+      file:
+        path: /tmp/jboss_restore
+        state: directory
+        mode: 0755
+
+    - name: Copy JBoss backup from remote server via SCP
+      command: >
+        scp -o StrictHostKeyChecking=no 
+        {{ remote_backup_user }}@{{ remote_backup_server }}:{{ remote_backup_path }}
+        /tmp/jboss_restore/{{ jboss_backup_tar }}
+      register: scp_result
+      changed_when: scp_result.rc == 0
+      failed_when: scp_result.rc != 0
+
+    - name: Verify backup file was copied
+      stat:
+        path: "/tmp/jboss_restore/{{ jboss_backup_tar }}"
+      register: backup_file
+      failed_when: not backup_file.stat.exists
+
+    - name: Display backup file size
+      debug:
+        msg: "Backup file size: {{ (backup_file.stat.size / 1024 / 1024) | round(2) }} MB"
+
+    - name: Remove existing JBoss installation
+      file:
+        path: "{{ jboss_home }}"
+        state: absent
 
     - name: Create JBoss home directory
       file:
@@ -41,49 +81,13 @@
         group: "{{ jboss_group }}"
         mode: 0755
 
-    # Backup restoration block
-    - name: Restore from backup (if enabled)
-      block:
-        - name: Extract backup to JBoss home
-          unarchive:
-            src: "/tmp/{{ jboss_backup_tar }}"
-            dest: /opt 
-            remote_src: yes
-            owner: "{{ jboss_user }}"
-            group: "{{ jboss_group }}"
-
-        - name: Clean up backup file
-          file:
-            path: "/tmp/{{ jboss_backup_tar }}"
-            state: absent
-      when: restore_from_backup | bool
-
-    # Update existing user password (works for both scenarios)
-    - name: Check if existing user needs password update
-      stat:
-        path: "{{ jboss_home }}/standalone/configuration/mgmt-users.properties"
-      register: mgmt_users_file
-
-    - name: Update password for existing user
-      block:
-        - name: Remove existing user entry
-          command: >
-            {{ jboss_home }}/bin/add-user.sh
-            -u {{ existing_user }}
-            -p {{ existing_user_new_password }}
-            -g {{ mgmt_groups }}
-          become_user: "{{ jboss_user }}"
-          register: user_update
-          failed_when: false
-
-        - name: Display user update result
-          debug:
-            msg: "User {{ existing_user }} password has been updated"
-          when: user_update.rc == 0
-      when: 
-        - mgmt_users_file.stat.exists
-        - existing_user is defined
-        - existing_user_new_password is defined
+    - name: Extract JBoss backup to /opt
+      unarchive:
+        src: "/tmp/jboss_restore/{{ jboss_backup_tar }}"
+        dest: /opt
+        remote_src: yes
+        owner: "{{ jboss_user }}"
+        group: "{{ jboss_group }}"
 
     - name: Set correct ownership for all JBoss files
       file:
@@ -92,44 +96,34 @@
         group: "{{ jboss_group }}"
         recurse: yes
 
-    - name: Configure firewall for 8080 and 9990
-      firewalld:
-        port: "{{ item }}/tcp"
-        permanent: true
-        state: enabled
-        immediate: yes
-      loop:
-        - 8080
-        - 9990
+    - name: Clean up backup file
+      file:
+        path: /tmp/jboss_restore
+        state: absent
 
-    - name: Create systemd service for JBoss
-      copy:
-        dest: /etc/systemd/system/jboss.service
-        content: |
-          [Unit]
-          Description=JBoss EAP 8
-          After=network.target
+    - name: Check if management users file exists
+      stat:
+        path: "{{ jboss_home }}/standalone/configuration/mgmt-users.properties"
+      register: mgmt_users_file
 
-          [Service]
-          User={{ jboss_user }}
-          Group={{ jboss_group }}
-          ExecStart={{ jboss_home }}/bin/standalone.sh -b 0.0.0.0 -bmanagement 0.0.0.0
-          ExecStop={{ jboss_home }}/bin/jboss-cli.sh --connect command=:shutdown
-          Restart=on-failure
-          RestartSec=10
-          LimitNOFILE=102642
+    - name: Verify add-user.sh script exists
+      stat:
+        path: "{{ jboss_home }}/bin/add-user.sh"
+      register: add_user_script
 
-          [Install]
-          WantedBy=multi-user.target
-      notify:
-        - Reload systemd
+    - name: Update password for existing user
+      block:
+        - name: Set executable permission on add-user.sh
+          file:
+            path: "{{ jboss_home }}/bin/add-user.sh"
+            mode: 0755
 
-    - name: Enable and start JBoss
-      systemd:
-        name: jboss
-        enabled: yes
-        state: started
-
-  handlers:
-    - name: Reload systemd
-      command: systemctl daemon-reload
+        - name: Update user password
+          shell: |
+            {{ jboss_home }}/bin/add-user.sh -a \
+            -u {{ existing_user }} \
+            -p {{ existing_user_new_password }} \
+            -g {{ mgmt_groups }} \
+            --silent
+          become_user: "{{ jboss_user }}"
+          register: user_update
